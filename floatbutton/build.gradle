@@ -39,7 +39,7 @@ version = "1.0.0"
 // 定义两个链接，下面会用到。
 def siteUrl = 'https://github.com/Xiemarc/MarcFloatActionButton' // 项目主页。
 def gitUrl = 'https://github.com/Xiemarc/MarcFloatActionButton.git' // Git仓库的url。
-group = "com.xie"
+group = "com.marc"
 install {
     repositories.mavenInstaller {
         // 生成pom.xml和参数
@@ -109,8 +109,8 @@ bintray {
     configurations = ['archives']
     pkg {
         repo = "maven"  // RichLib。
-        name = "andxie"
         // 发布到Bintray上的项目名字，这里的名字不是compile 'com.yanzhenjie:andserver:1.0.1'中的andserver。
+        name = "float"
         websiteUrl = siteUrl
         vcsUrl = gitUrl
         licenses = ["Apache-2.0"]
