@@ -4,7 +4,7 @@
     <modules>
       <module fileurl="file://$PROJECT_DIR$/MarcFloatActionButton.iml" filepath="$PROJECT_DIR$/MarcFloatActionButton.iml" />
       <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
-      <module fileurl="file://$PROJECT_DIR$/libraray/libraray.iml" filepath="$PROJECT_DIR$/libraray/libraray.iml" />
+      <module fileurl="file://$PROJECT_DIR$/floatbutton/floatbutton.iml" filepath="$PROJECT_DIR$/floatbutton/floatbutton.iml" />
     </modules>
   </component>
 </project>
