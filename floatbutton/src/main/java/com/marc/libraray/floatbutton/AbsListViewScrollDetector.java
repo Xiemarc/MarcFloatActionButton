@@ -1,4 +1,4 @@
-package com.marc.libraray;
+package com.marc.libraray.floatbutton;
 
 import android.support.annotation.NonNull;
 import android.view.View;

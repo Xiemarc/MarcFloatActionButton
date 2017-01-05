@@ -1,4 +1,4 @@
-package com.marc.libraray;
+package com.marc.libraray.floatbutton;
 
 import android.animation.AnimatorInflater;
 import android.animation.StateListAnimator;
@@ -31,6 +31,7 @@ import android.widget.AbsListView;
 import android.widget.ImageButton;
 import android.widget.ScrollView;
 
+import com.marc.libraray.R;
 import com.nineoldandroids.view.ViewHelper;
 import com.nineoldandroids.view.ViewPropertyAnimator;
 
@@ -354,8 +355,8 @@ public class FloatingActionButton extends ImageButton {
                     return;
                 }
             }
-            int translationY = visible ? 0 : height + getMarginBottom();
             int translationX = visible ? 0 : width + getMarginRight();
+            int translationY = visible ? 0 : height + getMarginBottom();
             if (animate) {
                 ViewPropertyAnimator.animate(this).setInterpolator(mInterpolator)
                         .setDuration(TRANSLATE_DURATION_MILLIS)

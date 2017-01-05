@@ -1,4 +1,4 @@
-package com.marc.libraray;
+package com.marc.libraray.floatbutton;
 
 public interface ScrollDirectionListener {
     void onScrollDown();

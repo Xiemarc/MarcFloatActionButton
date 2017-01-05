@@ -33,6 +33,9 @@ dependencies {
     testCompile 'junit:junit:4.12'
     compile 'com.android.support:recyclerview-v7:24.0.0@aar'
     compile 'com.nineoldandroids:library:2.4.0'
+    compile 'com.zzhoujay.markdown:markdown:1.0.0'
+    compile 'com.github.bumptech.glide:glide:3.7.0'
+    compile 'com.nostra13.universalimageloader:universal-image-loader:1.9.5'
 }
 // 项目引用的版本号，比如compile 'com.yanzhenjie:andserver:1.0.1'中的1.0.1就是这里配置的。
 version = "1.0.0"
@@ -94,6 +97,16 @@ task javadocJar(type: Jar, dependsOn: javadoc) {
     classifier = 'javadoc'
     from javadoc.destinationDir
 }
+
+//task makeJar(type: proguard.gradle.ProGuardTask, dependsOn: "build") {
+//    // 未混淆的jar
+//    injars 'build/intermediates/bundles/release/'
+//    // 混淆后的jar路径
+//    outjars 'build/utils.jar'
+//    // 具体需要keep住的类
+//    configuration 'proguard-rules.pro'
+//}
+
 artifacts {
     archives javadocJar
     archives sourcesJar
