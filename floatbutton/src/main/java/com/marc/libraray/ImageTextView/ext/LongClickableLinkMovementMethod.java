@@ -10,7 +10,6 @@ import android.widget.TextView;
 import com.marc.libraray.ImageTextView.spans.ClickableImageSpan;
 import com.marc.libraray.ImageTextView.spans.LongClickableSpan;
 
-
 public class LongClickableLinkMovementMethod extends LinkMovementMethod {
 
     private static final int MIN_INTERVAL = 500;

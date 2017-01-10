@@ -5,14 +5,12 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.text.style.ImageSpan;
-import android.util.Log;
 import android.view.View;
 
-import com.marc.libraray.ImageTextView.callback.OnImageClickListener;
 import com.marc.libraray.ImageTextView.callback.OnImageLongClickListener;
+import com.marc.libraray.ImageTextView.callback.OnImageClickListener;
 
 import java.util.List;
-
 
 public class ClickableImageSpan extends ImageSpan implements LongClickableSpan {
 
@@ -23,8 +21,16 @@ public class ClickableImageSpan extends ImageSpan implements LongClickableSpan {
     private final OnImageLongClickListener onImageLongClickListener;
     private final OnImageClickListener onImageClickListener;
 
-    public ClickableImageSpan(ImageSpan imageSpan, List<String> imageUrls, int position, OnImageClickListener onImageClickListener, OnImageLongClickListener onImageLongClickListener) {
-        super(imageSpan.getDrawable(), imageSpan.getVerticalAlignment());
+    public ClickableImageSpan(Drawable drawable, ClickableImageSpan clickableImageSpan, OnImageClickListener onImageClickListener, OnImageLongClickListener onImageLongClickListener) {
+        super(drawable, clickableImageSpan.getSource());
+        this.imageUrls = clickableImageSpan.imageUrls;
+        this.position = clickableImageSpan.position;
+        this.onImageClickListener = onImageClickListener;
+        this.onImageLongClickListener = onImageLongClickListener;
+    }
+
+    public ClickableImageSpan(Drawable drawable, List<String> imageUrls, int position, OnImageClickListener onImageClickListener, OnImageLongClickListener onImageLongClickListener) {
+        super(drawable, imageUrls.get(position));
         this.imageUrls = imageUrls;
         this.position = position;
         this.onImageClickListener = onImageClickListener;
@@ -37,7 +43,6 @@ public class ClickableImageSpan extends ImageSpan implements LongClickableSpan {
         super.draw(canvas, text, start, end, x, top, y, bottom, paint);
         this.x = x;
         this.top = top;
-        Log.i("ImageTextView", "src:" + position + "x:" + x + ",top:" + top);
     }
 
     public boolean clicked(int position) {

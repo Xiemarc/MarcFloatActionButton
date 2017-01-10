@@ -3,6 +3,7 @@ package com.marc.libraray.ImageTextView;
 import android.graphics.Color;
 import android.support.annotation.ColorInt;
 
+@SuppressWarnings("unused")
 public class LinkHolder {
 
     private static final int link_color = Color.parseColor("#4078C0");

@@ -3,11 +3,11 @@ package com.marc.libraray.ImageTextView.cache;
 import java.lang.ref.SoftReference;
 import java.util.HashMap;
 
-public final class ImageTextCacheManager {
+public final class RichCacheManager {
 
     private final HashMap<String, SoftReference<CharSequence>> pool;
 
-    private ImageTextCacheManager() {
+    private RichCacheManager() {
         pool = new HashMap<>();
     }
 
@@ -29,10 +29,10 @@ public final class ImageTextCacheManager {
 
 
     private static class RichCacheManagerHolder {
-        private static final ImageTextCacheManager RICH_CACHE_MANAGER = new ImageTextCacheManager();
+        private static final RichCacheManager RICH_CACHE_MANAGER = new RichCacheManager();
     }
 
-    public static ImageTextCacheManager getCache() {
+    public static RichCacheManager getCache() {
         return RichCacheManagerHolder.RICH_CACHE_MANAGER;
     }
 

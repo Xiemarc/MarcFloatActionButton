@@ -2,341 +2,194 @@ package com.marc.libraray.ImageTextView;
 
 import android.app.Activity;
 import android.content.Context;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
-import android.support.annotation.DrawableRes;
+import android.support.annotation.NonNull;
+import android.support.v4.util.LruCache;
 import android.support.v7.widget.TintContextWrapper;
-import android.text.Html;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.method.LinkMovementMethod;
-import android.text.style.ClickableSpan;
-import android.text.style.ImageSpan;
-import android.text.style.URLSpan;
 import android.widget.TextView;
 
-import com.bumptech.glide.BitmapTypeRequest;
-import com.bumptech.glide.DrawableTypeRequest;
-import com.bumptech.glide.GenericRequestBuilder;
-import com.bumptech.glide.GifTypeRequest;
-import com.bumptech.glide.Glide;
-import com.marc.libraray.ImageTextView.cache.ImageTextCacheManager;
-import com.marc.libraray.ImageTextView.callback.ImageFixCallback;
-import com.marc.libraray.ImageTextView.callback.LinkFixCallback;
-import com.marc.libraray.ImageTextView.callback.OnImageClickListener;
-import com.marc.libraray.ImageTextView.callback.OnImageLongClickListener;
-import com.marc.libraray.ImageTextView.callback.OnURLClickListener;
-import com.marc.libraray.ImageTextView.callback.OnUrlLongClickListener;
-import com.marc.libraray.ImageTextView.drawable.URLDrawable;
-import com.marc.libraray.ImageTextView.ext.Base64;
-import com.marc.libraray.ImageTextView.ext.HtmlTagHandler;
+import com.marc.libraray.ImageTextView.callback.ImageLoadNotify;
 import com.marc.libraray.ImageTextView.ext.LongClickableLinkMovementMethod;
+import com.marc.libraray.ImageTextView.parser.CachedSpannedParser;
+import com.marc.libraray.ImageTextView.ext.HtmlTagHandler;
+import com.marc.libraray.ImageTextView.ext.MD5;
 import com.marc.libraray.ImageTextView.parser.Html2SpannedParser;
+import com.marc.libraray.ImageTextView.parser.ImageGetterWrapper;
 import com.marc.libraray.ImageTextView.parser.Markdown2SpannedParser;
 import com.marc.libraray.ImageTextView.parser.SpannedParser;
-import com.marc.libraray.ImageTextView.spans.ClickableImageSpan;
-import com.marc.libraray.ImageTextView.spans.LongClickableURLSpan;
-import com.marc.libraray.ImageTextView.target.ImageLoadNotify;
-import com.marc.libraray.ImageTextView.target.ImageTarget;
-import com.marc.libraray.ImageTextView.target.ImageTargetBitmap;
-import com.marc.libraray.ImageTextView.target.ImageTargetGif;
 
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.WeakHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @SuppressWarnings("unused")
-public class ImageTextView implements ImageLoadNotify {
+public class ImageTextView implements ImageGetterWrapper, ImageLoadNotify {
+
+    private static final LruCache<String, SoftReference<SpannableStringBuilder>> richCache;
+    private static final WeakHashMap<Object, HashSet<WeakReference<ImageTextView>>> instances;
+
+    static {
+        richCache = new LruCache<>(20);
+        instances = new WeakHashMap<>();
+    }
+
+    static void bind(Object tag, ImageTextView richText) {
+        HashSet<WeakReference<ImageTextView>> richTexts = instances.get(tag);
+        if (richTexts == null) {
+            richTexts = new HashSet<>();
+            instances.put(tag, richTexts);
+        }
+        richTexts.add(new WeakReference<>(richText));
+    }
+
+    /**
+     * 清除tag绑定的所有RichText，并清除所有的图片缓存
+     *
+     * @param tag TAG
+     */
+    public static void clear(Object tag) {
+        HashSet<WeakReference<ImageTextView>> richTexts = instances.get(tag);
+        if (richTexts != null) {
+            for (WeakReference<ImageTextView> weakReference : richTexts) {
+                ImageTextView richText = weakReference.get();
+                if (richText != null) {
+                    richText.clear();
+                }
+            }
+        }
+        instances.remove(tag);
+    }
+
+    private static void cache(String source, SpannableStringBuilder ssb) {
+        ssb = new SpannableStringBuilder(ssb);
+        ssb.setSpan(new CachedSpannedParser.Cached(), 0, ssb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        richCache.put(MD5.generate(source), new SoftReference<>(ssb));
+    }
+
+    private static SpannableStringBuilder loadCache(String source) {
+        SoftReference<SpannableStringBuilder> cache = richCache.get(MD5.generate(source));
+        SpannableStringBuilder ssb = cache == null ? null : cache.get();
+        if (ssb != null) {
+            return new SpannableStringBuilder(ssb);
+        }
+        return null;
+    }
 
     private static final String TAG_TARGET = "target";
 
-    private static Matcher IMAGE_TAG_MATCHER = Pattern.compile("<(img|IMG)(.*?)>").matcher("");
-    private static Matcher IMAGE_WIDTH_MATCHER = Pattern.compile("(width|WIDTH)=\"(.*?)\"").matcher("");
-    private static Matcher IMAGE_HEIGHT_MATCHER = Pattern.compile("(height|HEIGHT)=\"(.*?)\"").matcher("");
-    private static Matcher IMAGE_SRC_MATCHER = Pattern.compile("(src|SRC)=\"(.*?)\"").matcher("");
+    private static Pattern IMAGE_TAG_PATTERN = Pattern.compile("<(img|IMG)(.*?)>");
+    private static Pattern IMAGE_WIDTH_PATTERN = Pattern.compile("(width|WIDTH)=\"(.*?)\"");
+    private static Pattern IMAGE_HEIGHT_PATTERN = Pattern.compile("(height|HEIGHT)=\"(.*?)\"");
+    private static Pattern IMAGE_SRC_PATTERN = Pattern.compile("(src|SRC)=\"(.*?)\"");
 
-
-    private Drawable placeHolder, errorImage;//占位图，错误图
-    @DrawableRes
-    private int placeHolderRes = -1, errorImageRes = -1;
-    private OnImageClickListener onImageClickListener;//图片点击回调
-    private OnImageLongClickListener onImageLongClickListener; // 图片长按回调
-    private OnUrlLongClickListener onUrlLongClickListener; // 链接长按回调
-    private OnURLClickListener onURLClickListener;//超链接点击回调
-    private SoftReference<HashSet<ImageTarget>> targets;
     private HashMap<String, ImageHolder> imageHolderMap;
-    private ImageFixCallback imageFixCallback;
-    private LinkFixCallback linkFixCallback;
 
-    private int prepareCount;
-    private int loadedCount;
-    @ImageTextState
-    private int state;
-    private boolean resetSize;
-    private boolean autoFix;
-    private boolean noImage;
-    private int clickable;
-    private final String sourceText;
-    private CharSequence richText;
-    @ImageTextType
-    private int type;
-    private SpannedParser spannedParser;
+    @RichState
+    private int state = RichState.ready;
 
-    private WeakReference<TextView> textViewWeakReference;
+    private final SpannedParser spannedParser;
+    private final CachedSpannedParser cachedSpannedParser;
+    private final SoftReference<TextView> textViewSoftReference;
+    private final RichTextConfig config;
+    private int count;
+    private int loadingCount;
+    private SoftReference<SpannableStringBuilder> richText;
 
-
-    private ImageTextView(boolean autoFix, String sourceText, Drawable placeHolder, Drawable errorImage, @ImageTextType int type) {
-        this.autoFix = autoFix;
-        this.sourceText = sourceText;
-        this.placeHolder = placeHolder;
-        this.errorImage = errorImage;
-        this.type = type;
-        this.clickable = 0;
-        this.noImage = false;
-        this.state = ImageTextState.ready;
-        this.resetSize = false;
-    }
-
-    private ImageTextView(String sourceText) {
-        this(true, sourceText, new ColorDrawable(Color.LTGRAY), new ColorDrawable(Color.GRAY), ImageTextType.HTML);
-    }
-
-
-    /**
-     * 给TextView设置富文本
-     *
-     * @param textView textView
-     */
-    public void into(final TextView textView) {
-        this.textViewWeakReference = new WeakReference<>(textView);
-        if (type == ImageTextType.MARKDOWN) {
+    ImageTextView(RichTextConfig config, TextView textView) {
+        this.config = config;
+        this.textViewSoftReference = new SoftReference<>(textView);
+        if (config.richType == RichType.MARKDOWN) {
             spannedParser = new Markdown2SpannedParser(textView);
         } else {
             spannedParser = new Html2SpannedParser(new HtmlTagHandler(textView));
         }
-        if (clickable == 0) {
-            if (onImageLongClickListener != null || onUrlLongClickListener != null || onImageClickListener != null || onURLClickListener != null) {
-                clickable = 1;
-            }
-        }
-        if (clickable > 0) {
+        if (config.clickable > 0) {
             textView.setMovementMethod(new LongClickableLinkMovementMethod());
-        } else if (clickable == 0) {
+        } else if (config.clickable == 0) {
             textView.setMovementMethod(LinkMovementMethod.getInstance());
         }
-        textView.post(new Runnable() {
-            @Override
-            public void run() {
-                textView.setText(generateImageText(sourceText));
-            }
-        });
+        this.cachedSpannedParser = new CachedSpannedParser();
     }
 
-    private void recycleTarget(HashSet<ImageTarget> ts) {
-        if (ts != null) {
-            for (ImageTarget it : ts) {
-                if (it != null) {
-                    it.recycle();
+    public static RichTextConfig.RichTextConfigBuild from(String source) {
+        return fromHtml(source);
+    }
+
+    public static RichTextConfig.RichTextConfigBuild fromHtml(String source) {
+        return from(source, RichType.HTML);
+    }
+
+    public static RichTextConfig.RichTextConfigBuild fromMarkdown(String source) {
+        return from(source, RichType.MARKDOWN);
+    }
+
+    public static RichTextConfig.RichTextConfigBuild from(String source, @RichType int richType) {
+        return new RichTextConfig.RichTextConfigBuild(source, richType);
+    }
+
+    void generateAndSet() {
+        final TextView textView = textViewSoftReference.get();
+        if (textView != null) {
+            textView.post(new Runnable() {
+                @Override
+                public void run() {
+                    textView.setText(generateRichText());
                 }
-            }
-            ts.clear();
+            });
         }
-    }
-
-    /**
-     * 检查TextView tag复用
-     *
-     * @param textView textView
-     */
-    @SuppressWarnings("unchecked")
-    private void checkTag(TextView textView) {
-        HashSet<ImageTarget> ts = (HashSet<ImageTarget>) textView.getTag(TAG_TARGET.hashCode());
-        if (ts != null) {
-            recycleTarget(ts);
-        }
-        if (targets == null || targets.get() == null) {
-            targets = new SoftReference<>(new HashSet<ImageTarget>());
-        }
-        textView.setTag(TAG_TARGET.hashCode(), targets.get());
     }
 
     /**
      * 生成富文本
      *
-     * @param text text
      * @return Spanned
      */
-    private CharSequence generateImageText(String text) {
-        if (state == ImageTextState.loaded && richText != null) {
-            return richText;
-        } else {
-            CharSequence cs = ImageTextCacheManager.getCache().get(text);
-            if (cs != null) {
-                return cs;
-            }
-        }
-        state = ImageTextState.loading;
-        if (type != ImageTextType.MARKDOWN) {
-            analyzeImages(text);
-        } else {
-            imageHolderMap = new HashMap<>();
-        }
-
-        TextView textView = textViewWeakReference.get();
+    private CharSequence generateRichText() {
+        TextView textView = textViewSoftReference.get();
         if (textView == null) {
             return null;
         }
-        checkTag(textView);
+        if (config.richType != RichType.MARKDOWN) {
+            analyzeImages(config.source);
+        } else {
+            imageHolderMap = new HashMap<>();
+        }
+        SpannableStringBuilder spannableStringBuilder = null;
+        if (config.cacheType > CacheType.NONE) {
+            spannableStringBuilder = loadCache(config.source);
+        }
+        if (spannableStringBuilder == null) {
+            spannableStringBuilder = parseRichText();
+        }
+        richText = new SoftReference<>(spannableStringBuilder);
+        config.imageGetter.registerImageLoadNotify(this);
+        count = cachedSpannedParser.parse(spannableStringBuilder, this, config);
+        return spannableStringBuilder;
+    }
 
-        Spanned spanned = spannedParser.parse(text, asyncImageGetter);
+    @NonNull
+    private SpannableStringBuilder parseRichText() {
         SpannableStringBuilder spannableStringBuilder;
+        state = RichState.loading;
+        String source = config.source;
+
+        Spanned spanned = spannedParser.parse(source);
         if (spanned instanceof SpannableStringBuilder) {
             spannableStringBuilder = (SpannableStringBuilder) spanned;
         } else {
             spannableStringBuilder = new SpannableStringBuilder(spanned);
         }
-        if (clickable > 0) {
-            // 处理图片得点击事件
-            ImageSpan[] imageSpans = spannableStringBuilder.getSpans(0, spannableStringBuilder.length(), ImageSpan.class);
-            final List<String> imageUrls = new ArrayList<>();
-
-            for (int i = 0, size = imageSpans.length; i < size; i++) {
-                ImageSpan imageSpan = imageSpans[i];
-                String imageUrl = imageSpan.getSource();
-                int start = spannableStringBuilder.getSpanStart(imageSpan);
-                int end = spannableStringBuilder.getSpanEnd(imageSpan);
-                imageUrls.add(imageUrl);
-
-                ClickableImageSpan clickableImageSpan = new ClickableImageSpan(imageSpan, imageUrls, i, onImageClickListener, onImageLongClickListener);
-                // 去除其他的ClickableSpan
-                ClickableSpan[] clickableSpans = spannableStringBuilder.getSpans(start, end, ClickableSpan.class);
-                if (clickableSpans != null && clickableSpans.length != 0) {
-                    for (ClickableSpan cs : clickableSpans) {
-                        spannableStringBuilder.removeSpan(cs);
-                    }
-                }
-                spannableStringBuilder.removeSpan(imageSpan);
-                spannableStringBuilder.setSpan(clickableImageSpan, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-
-            // 处理超链接点击事件
-            URLSpan[] urlSpans = spannableStringBuilder.getSpans(0, spannableStringBuilder.length(), URLSpan.class);
-
-            for (int i = 0, size = urlSpans == null ? 0 : urlSpans.length; i < size; i++) {
-                URLSpan urlSpan = urlSpans[i];
-
-                int start = spannableStringBuilder.getSpanStart(urlSpan);
-                int end = spannableStringBuilder.getSpanEnd(urlSpan);
-
-                spannableStringBuilder.removeSpan(urlSpan);
-                LinkHolder linkHolder = new LinkHolder(urlSpan.getURL());
-                if (linkFixCallback != null) {
-                    linkFixCallback.fix(linkHolder);
-                }
-                spannableStringBuilder.setSpan(new LongClickableURLSpan(urlSpan.getURL(), onURLClickListener, onUrlLongClickListener, linkHolder), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-        }
         return spannableStringBuilder;
     }
-
-    // 图片异步加载器
-    private final Html.ImageGetter asyncImageGetter = new Html.ImageGetter() {
-        @Override
-        public Drawable getDrawable(String source) {
-            if (noImage) {
-                return new ColorDrawable(Color.TRANSPARENT);
-            }
-            TextView textView = textViewWeakReference.get();
-            if (textView == null) {
-                return null;
-            }
-            // 判断activity是否已结束
-            if (!activityIsAlive(textView.getContext())) {
-                return null;
-            }
-            final URLDrawable urlDrawable = new URLDrawable();
-            ImageHolder imageHolder;
-            if (type == ImageTextType.MARKDOWN) {
-                imageHolder = new ImageHolder(source, imageHolderMap.size());
-            } else {
-                imageHolder = imageHolderMap.get(source);
-                if (imageHolder == null) {
-                    imageHolder = new ImageHolder(source, 0);
-                    imageHolderMap.put(source, imageHolder);
-                }
-            }
-            final ImageHolder holder = imageHolder;
-            final ImageTarget target;
-            final GenericRequestBuilder load;
-            if (isGif(holder.getSrc())) {
-                holder.setImageType(ImageHolder.ImageType.GIF);
-            } else {
-                holder.setImageType(ImageHolder.ImageType.JPG);
-            }
-            holder.setImageState(ImageHolder.ImageState.INIT);
-            if (!autoFix && imageFixCallback != null) {
-                imageFixCallback.onFix(holder);
-                if (!holder.isShow()) {
-                    return new ColorDrawable(Color.TRANSPARENT);
-                }
-            }
-            DrawableTypeRequest dtr;
-            byte[] src = Base64.decode(source);
-            if (src != null) {
-                dtr = Glide.with(textView.getContext()).load(src);
-            } else {
-                dtr = Glide.with(textView.getContext()).load(source);
-            }
-            if (holder.isGif()) {
-                target = new ImageTargetGif(textView, urlDrawable, holder, autoFix, imageFixCallback, ImageTextView.this);
-                load = dtr.asGif();
-            } else {
-                target = new ImageTargetBitmap(textView, urlDrawable, holder, autoFix, imageFixCallback, ImageTextView.this);
-                load = dtr.asBitmap().atMost();
-            }
-            if (targets.get() != null) {
-                targets.get().add(target);
-            }
-            if (!resetSize && holder.getWidth() > 0 && holder.getHeight() > 0) {
-                load.override(holder.getWidth(), holder.getHeight());
-            }
-            if (holder.getScaleType() == ImageHolder.ScaleType.CENTER_CROP) {
-                if (holder.isGif()) {
-                    //noinspection ConstantConditions
-                    ((GifTypeRequest) load).centerCrop();
-                } else {
-                    //noinspection ConstantConditions
-                    ((BitmapTypeRequest) load).centerCrop();
-                }
-            } else if (holder.getScaleType() == ImageHolder.ScaleType.FIT_CENTER) {
-                if (holder.isGif()) {
-                    //noinspection ConstantConditions
-                    ((GifTypeRequest) load).fitCenter();
-                } else {
-                    //noinspection ConstantConditions
-                    ((BitmapTypeRequest) load).fitCenter();
-                }
-            }
-            textView.post(new Runnable() {
-                @Override
-                public void run() {
-                    setPlaceHolder(load);
-                    setErrorImage(load);
-                    load.into(target);
-                }
-            });
-            prepareCount++;
-            return urlDrawable;
-        }
-    };
 
     /**
      * 从文本中拿到<img/>标签,并获取图片url和宽高
@@ -345,27 +198,27 @@ public class ImageTextView implements ImageLoadNotify {
         imageHolderMap = new HashMap<>();
         ImageHolder holder;
         int position = 0;
-        IMAGE_TAG_MATCHER.reset(text);
-        while (IMAGE_TAG_MATCHER.find()) {
-            String image = IMAGE_TAG_MATCHER.group(2).trim();
-            IMAGE_SRC_MATCHER.reset(image);
+        Matcher imageTagMatcher = IMAGE_TAG_PATTERN.matcher(text);
+        while (imageTagMatcher.find()) {
+            String image = imageTagMatcher.group(2).trim();
+            Matcher imageSrcMatcher = IMAGE_SRC_PATTERN.matcher(image);
             String src = null;
-            if (IMAGE_SRC_MATCHER.find()) {
-                src = IMAGE_SRC_MATCHER.group(2).trim();
+            if (imageSrcMatcher.find()) {
+                src = imageSrcMatcher.group(2).trim();
             }
             if (TextUtils.isEmpty(src)) {
                 continue;
             }
             holder = new ImageHolder(src, position);
-            IMAGE_WIDTH_MATCHER.reset(image);
-            if (IMAGE_WIDTH_MATCHER.find()) {
-                holder.setWidth(parseStringToInteger(IMAGE_WIDTH_MATCHER.group(2).trim()));
+            Matcher imageWidthMatcher = IMAGE_WIDTH_PATTERN.matcher(image);
+            if (imageWidthMatcher.find()) {
+                holder.setWidth(parseStringToInteger(imageWidthMatcher.group(2).trim()));
             }
-            IMAGE_HEIGHT_MATCHER.reset(image);
-            if (IMAGE_HEIGHT_MATCHER.find()) {
-                holder.setHeight(parseStringToInteger(IMAGE_HEIGHT_MATCHER.group(2).trim()));
+            Matcher imageHeightMatcher = IMAGE_HEIGHT_PATTERN.matcher(image);
+            if (imageHeightMatcher.find()) {
+                holder.setHeight(parseStringToInteger(imageHeightMatcher.group(2).trim()));
             }
-            imageHolderMap.put(holder.getSrc(), holder);
+            imageHolderMap.put(holder.getSource(), holder);
             position++;
         }
     }
@@ -412,259 +265,94 @@ public class ImageTextView implements ImageLoadNotify {
         return index > 0 && "gif".toUpperCase().equals(path.substring(index + 1).toUpperCase());
     }
 
-
-    /**
-     * @param richText 待解析文本
-     * @return ImageTextView
-     * @see #fromHtml(String)
-     */
-    public static ImageTextView from(String richText) {
-        return fromHtml(richText);
-    }
-
-    /**
-     * 构建RichText并设置数据源为Html
-     *
-     * @param richText 待解析文本
-     * @return ImageTextView
-     */
-    @SuppressWarnings("WeakerAccess")
-    public static ImageTextView fromHtml(String richText) {
-        ImageTextView r = new ImageTextView(richText);
-        r.type = ImageTextType.HTML;
-        return r;
-    }
-
-    /**
-     * 构建RichText并设置数据源为Markdown
-     *
-     * @param markdown markdown源文本
-     * @return ImageTextView
-     */
-    public static ImageTextView fromMarkdown(String markdown) {
-        return from(markdown).type(ImageTextType.MARKDOWN);
-    }
-
     /**
      * 回收所有图片和任务
      */
     public void clear() {
-        if (targets != null)
-            recycleTarget(targets.get());
-        TextView textView = textViewWeakReference.get();
+        TextView textView = textViewSoftReference.get();
         if (textView != null) {
             textView.setText(null);
         }
-        ImageTextCacheManager.getCache().clear(sourceText);
+        config.imageGetter.recycle();
     }
 
-    /**
-     * 是否图片宽高自动修复自屏宽，默认true
-     *
-     * @param autoFix autoFix
-     * @return ImageTextView
-     */
-    public ImageTextView autoFix(boolean autoFix) {
-        this.autoFix = autoFix;
-        return this;
-    }
-
-    /**
-     * 不使用img标签里的宽高，img标签的宽高存在才有用
-     *
-     * @param resetSize false：使用标签里的宽高，不会触发SIZE_READY的回调；true：忽略标签里的宽高，触发SIZE_READY的回调获取尺寸大小。默认为false
-     * @return ImageTextView
-     */
-    public ImageTextView resetSize(boolean resetSize) {
-        this.resetSize = resetSize;
-        return this;
-    }
-
-    /**
-     * 手动修复图片宽高
-     *
-     * @param callback ImageFixCallback回调
-     * @return ImageTextView
-     */
-    public ImageTextView fix(ImageFixCallback callback) {
-        this.imageFixCallback = callback;
-        return this;
-    }
-
-    /**
-     * 链接修复
-     *
-     * @param callback LinkFixCallback
-     * @return ImageTextView
-     */
-    public ImageTextView linkFix(LinkFixCallback callback) {
-        this.linkFixCallback = callback;
-        return this;
-    }
-
-    /**
-     * 不显示图片
-     *
-     * @param noImage 默认false
-     * @return ImageTextView
-     */
-    public ImageTextView noImage(boolean noImage) {
-        this.noImage = noImage;
-        return this;
-    }
-
-    /**
-     * 是否屏蔽点击，不进行此项设置只会在设置了点击回调才会响应点击事件
-     *
-     * @param clickable clickable，false:屏蔽点击事件，true不屏蔽不设置点击回调也可以响应响应的链接默认回调
-     * @return ImageTextView
-     */
-    public ImageTextView clickable(boolean clickable) {
-        this.clickable = clickable ? 1 : -1;
-        return this;
-    }
-
-    /**
-     * 数据源类型
-     *
-     * @param type type
-     * @return ImageTextView
-     * @see ImageTextType
-     */
-    @SuppressWarnings("WeakerAccess")
-    public ImageTextView type(@ImageTextType int type) {
-        this.type = type;
-        return this;
-    }
-
-    /**
-     * 图片点击回调
-     *
-     * @param imageClickListener 回调
-     * @return ImageTextView
-     */
-    public ImageTextView imageClick(OnImageClickListener imageClickListener) {
-        this.onImageClickListener = imageClickListener;
-        return this;
-    }
-
-    /**
-     * 链接点击回调
-     *
-     * @param onURLClickListener 回调
-     * @return ImageTextView
-     */
-    public ImageTextView urlClick(OnURLClickListener onURLClickListener) {
-        this.onURLClickListener = onURLClickListener;
-        return this;
-    }
-
-    /**
-     * 图片长按回调
-     *
-     * @param imageLongClickListener 回调
-     * @return ImageTextView
-     */
-    public ImageTextView imageLongClick(OnImageLongClickListener imageLongClickListener) {
-        this.onImageLongClickListener = imageLongClickListener;
-        return this;
-    }
-
-    /**
-     * 链接长按回调
-     *
-     * @param urlLongClickListener 回调
-     * @return ImageTextView
-     */
-    public ImageTextView urlLongClick(OnUrlLongClickListener urlLongClickListener) {
-        this.onUrlLongClickListener = urlLongClickListener;
-        return this;
-    }
-
-    /**
-     * 图片加载过程中的占位图
-     *
-     * @param placeHolder 占位图
-     * @return ImageTextView
-     */
-    public ImageTextView placeHolder(Drawable placeHolder) {
-        this.placeHolder = placeHolder;
-        return this;
-    }
-
-    /**
-     * 图片加载失败的占位图
-     *
-     * @param errorImage 占位图
-     * @return ImageTextView
-     */
-    public ImageTextView error(Drawable errorImage) {
-        this.errorImage = errorImage;
-        return this;
-    }
-
-    /**
-     * 图片加载过程中的占位图
-     *
-     * @param placeHolder 占位图
-     * @return ImageTextView
-     */
-    public ImageTextView placeHolder(@DrawableRes int placeHolder) {
-        this.placeHolderRes = placeHolder;
-        return this;
-    }
-
-    /**
-     * 图片加载失败的占位图
-     *
-     * @param errorImage 占位图
-     * @return ImageTextView
-     */
-    public ImageTextView error(@DrawableRes int errorImage) {
-        this.errorImageRes = errorImage;
-        return this;
-    }
-
-    private void setPlaceHolder(GenericRequestBuilder load) {
-        if (placeHolderRes > 0) {
-            load.placeholder(placeHolderRes);
-        } else {
-            load.placeholder(placeHolder);
-        }
-    }
-
-    private void setErrorImage(GenericRequestBuilder load) {
-        if (errorImageRes > 0) {
-            load.error(errorImageRes);
-        } else {
-            load.error(errorImage);
-        }
-    }
-
-    @Override
-    public void done(CharSequence value) {
-        loadedCount++;
-        if (loadedCount >= prepareCount) {
-            if (value != null) {
-                richText = value;
-            } else {
-                TextView textView = textViewWeakReference.get();
-                if (textView == null) {
-                    return;
-                }
-                richText = textView.getText();
-            }
-            state = ImageTextState.loaded;
-            ImageTextCacheManager.getCache().put(sourceText, richText);
-        }
-    }
 
     /**
      * 获取解析的状态
      *
      * @return state
+     * @see RichState
      */
+    @RichState
     public int getState() {
         return state;
     }
+
+    @Override
+    public Drawable getDrawable(String source) {
+        loadingCount++;
+        if (config.imageGetter == null) {
+            return null;
+        }
+        if (config.noImage) {
+            return null;
+        }
+        TextView textView = textViewSoftReference.get();
+        if (textView == null) {
+            return null;
+        }
+        // 判断activity是否已结束
+        if (!activityIsAlive(textView.getContext())) {
+            return null;
+        }
+        ImageHolder holder;
+        if (config.richType == RichType.MARKDOWN) {
+            holder = new ImageHolder(source, loadingCount - 1);
+            imageHolderMap.put(source, holder);
+        } else {
+            holder = imageHolderMap.get(source);
+            if (holder == null) {
+                holder = new ImageHolder(source, loadingCount - 1);
+                imageHolderMap.put(source, holder);
+            }
+        }
+        if (isGif(holder.getSource())) {
+            holder.setImageType(ImageHolder.ImageType.GIF);
+        } else {
+            holder.setImageType(ImageHolder.ImageType.JPG);
+        }
+        holder.setImageState(ImageHolder.ImageState.INIT);
+        if (!config.autoFix && config.imageFixCallback != null) {
+            config.imageFixCallback.onFix(holder);
+            if (!holder.isShow()) {
+                return null;
+            }
+        } else {
+            int w = textView.getWidth() - textView.getPaddingLeft() - textView.getPaddingRight();
+            if (holder.getWidth() > w) {
+                float r = (float) w / holder.getWidth();
+                holder.setWidth(w);
+                holder.setHeight((int) (r * holder.getHeight()));
+            }
+        }
+        return config.imageGetter.getDrawable(holder, config, textView);
+    }
+
+    @Override
+    public void done(Object from) {
+        if (from instanceof Integer) {
+            int loadedCount = (int) from;
+            if (loadedCount >= count) {
+                state = RichState.loaded;
+                if (config.cacheType >= CacheType.LAYOUT) {
+                    SpannableStringBuilder ssb = richText.get();
+                    if (ssb != null) {
+                        cache(config.source, ssb);
+                    }
+                }
+            }
+        }
+    }
+
+
 }

@@ -12,7 +12,7 @@ public class Html2SpannedParser implements SpannedParser {
     }
 
     @Override
-    public Spanned parse(String source, Html.ImageGetter imageGetter) {
-        return Html.fromHtml(source, imageGetter, tagHandler);
+    public Spanned parse(String source) {
+        return Html.fromHtml(source, null, tagHandler);
     }
 }

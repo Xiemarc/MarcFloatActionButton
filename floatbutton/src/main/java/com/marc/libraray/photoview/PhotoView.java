@@ -2,8 +2,10 @@ package com.marc.libraray.photoview;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.PointF;
+import android.graphics.PorterDuff;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
@@ -93,6 +95,10 @@ public class PhotoView extends ImageView {
 
     private OnLongClickListener mLongClick;
 
+    private float martixValue = 1.0f;
+    private int color;//设置背景颜色
+    private boolean isChanBackgroundColor = true;//是否设置背景颜色,默认开启
+
     public PhotoView(Context context) {
         super(context);
         init();
@@ -103,12 +109,14 @@ public class PhotoView extends ImageView {
         init();
     }
 
+
     public PhotoView(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
         init();
     }
 
     private void init() {
+
         super.setScaleType(ScaleType.MATRIX);
         if (mScaleType == null) mScaleType = ScaleType.CENTER_INSIDE;
         mRotateDetector = new RotateGestureDetector(mRotateListener);
@@ -122,6 +130,8 @@ public class PhotoView extends ImageView {
         mMinRotate = MIN_ROTATE;
         mAnimaDuring = ANIMA_DURING;
         mMaxScale = MAX_SCALE;
+        //默认白色
+        color = Color.WHITE;
     }
 
     /**
@@ -287,14 +297,15 @@ public class PhotoView extends ImageView {
         isZoonUp = false;
 
         Drawable img = getDrawable();
-
+        if (isChanBackgroundColor) {
+            img.setColorFilter(color, PorterDuff.Mode.DST_ATOP);
+        }
         int w = getWidth();
         int h = getHeight();
         int imgw = getDrawableWidth(img);
         int imgh = getDrawableHeight(img);
 
         mBaseRect.set(0, 0, imgw, imgh);
-
         // 以图片中心点居中位移
         int tx = (w - imgw) / 2;
         int ty = (h - imgh) / 2;
@@ -315,7 +326,8 @@ public class PhotoView extends ImageView {
 
         mBaseMatrix.reset();
         mBaseMatrix.postTranslate(tx, ty);
-        mBaseMatrix.postScale(scale, scale, mScreenCenter.x, mScreenCenter.y);
+//        mBaseMatrix.postScale(scale, scale, mScreenCenter.x, mScreenCenter.y);
+        mBaseMatrix.postScale(scale * martixValue, scale * martixValue, mScreenCenter.x, mScreenCenter.y);
         mBaseMatrix.mapRect(mBaseRect);
 
         mHalfBaseRectWidth = mBaseRect.width() / 2;
@@ -364,7 +376,9 @@ public class PhotoView extends ImageView {
         if (!isKnowSize) return;
 
         Drawable img = getDrawable();
-
+        if (isChanBackgroundColor) {
+            img.setColorFilter(color, PorterDuff.Mode.DST_ATOP);
+        }
         int imgw = getDrawableWidth(img);
         int imgh = getDrawableHeight(img);
 
@@ -453,6 +467,9 @@ public class PhotoView extends ImageView {
 
     private void resetBase() {
         Drawable img = getDrawable();
+        if (isChanBackgroundColor) {
+            img.setColorFilter(color, PorterDuff.Mode.DST_ATOP);
+        }
         int imgw = getDrawableWidth(img);
         int imgh = getDrawableHeight(img);
         mBaseRect.set(0, 0, imgw, imgh);
@@ -485,6 +502,9 @@ public class PhotoView extends ImageView {
         }
 
         Drawable d = getDrawable();
+        if (isChanBackgroundColor) {
+            d.setColorFilter(color, PorterDuff.Mode.DST_ATOP);
+        }
         int drawableW = getDrawableWidth(d);
         int drawableH = getDrawableHeight(d);
 
@@ -1345,6 +1365,56 @@ public class PhotoView extends ImageView {
             mFromInfo = info;
             mInfoTime = System.currentTimeMillis();
         }
+    }
+
+    /**
+     * 设置matrix初始值的
+     *
+     * @param value
+     */
+    public void setInitScale(float value) {
+        martixValue = value;
+//        initBase();
+    }
+
+    /**
+     * 获得初始值
+     *
+     * @return
+     */
+    public float getInitScale() {
+        return martixValue;
+    }
+
+    /**
+     * 是否开启了背景颜色
+     *
+     * @return
+     */
+    public boolean isChanBackgroundColor() {
+        return isChanBackgroundColor;
+    }
+
+    /**
+     * 设置背景颜色
+     *
+     * @param chanBackgroundColor
+     */
+    public void setChanBackgroundColor(boolean chanBackgroundColor) {
+        isChanBackgroundColor = chanBackgroundColor;
+    }
+
+    public int getColor() {
+        return color;
+    }
+
+    /**
+     * 设置背景颜色
+     *
+     * @param color
+     */
+    public void setColor(int color) {
+        this.color = color;
     }
 
     public void animaTo(Info info, Runnable completeCallBack) {
